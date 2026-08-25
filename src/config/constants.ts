@@ -21,6 +21,15 @@ export function isOAuthProviderType(
   return providerType != null && OAUTH_PROVIDER_TYPES.includes(providerType);
 }
 
+export const AGGREGATE_PROVIDER_TYPE = "aggregate";
+
+/** 聚合供应商:Claude 的模型档位分别绑定不同来源供应商,由本地代理按档路由 */
+export function isAggregateProviderType(
+  providerType: string | null | undefined,
+): boolean {
+  return providerType === AGGREGATE_PROVIDER_TYPE;
+}
+
 // 用量脚本模板类型常量
 export const TEMPLATE_TYPES = {
   CUSTOM: "custom",

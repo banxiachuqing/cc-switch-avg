@@ -1,6 +1,9 @@
 import type { AppId } from "@/lib/api";
 import type { Provider } from "@/types";
-import { isOAuthProviderType } from "@/config/constants";
+import {
+  isAggregateProviderType,
+  isOAuthProviderType,
+} from "@/config/constants";
 import { resolveManagedAccountId } from "@/lib/authBinding";
 import {
   extractCodexBaseUrl,
@@ -124,6 +127,14 @@ export function providerNeedsRouting(
     return false;
 
   const isManagedOAuth = isOAuthProviderType(provider.meta?.providerType);
+
+  // 聚合供应商本身没有上游地址,请求必须经本地代理按档路由(仅 Claude)
+  if (
+    appId === "claude" &&
+    isAggregateProviderType(provider.meta?.providerType)
+  ) {
+    return true;
+  }
 
   // Desktop 普通供应商由表单模式决定；托管 OAuth 的 token 只能由代理注入。
   if (appId === "claude-desktop") {

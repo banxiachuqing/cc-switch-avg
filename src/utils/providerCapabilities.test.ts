@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Provider } from "@/types";
 import type { AppId } from "@/lib/api";
+import { isAggregateProviderType } from "@/config/constants";
 import {
   providerNeedsRouting,
   resolveCodexOfficialIdentity,
@@ -379,5 +380,25 @@ describe("providerNeedsRouting", () => {
         ).toBe(true);
       },
     );
+  });
+
+  describe("aggregate provider", () => {
+    it("isAggregateProviderType 只认 aggregate", () => {
+      expect(isAggregateProviderType("aggregate")).toBe(true);
+      expect(isAggregateProviderType("github_copilot")).toBe(false);
+      expect(isAggregateProviderType(undefined)).toBe(false);
+    });
+
+    it("Claude 聚合供应商必须走本地路由", () => {
+      const provider = mkProvider({
+        id: "agg",
+        name: "聚合",
+        settingsConfig: { env: {}, aggregate: {} },
+        meta: { providerType: "aggregate" },
+      });
+      expect(providerNeedsRouting("claude", provider)).toBe(true);
+      expect(providerNeedsRouting("codex", provider)).toBe(false);
+      expect(providerNeedsRouting("claude-desktop", provider)).toBe(false);
+    });
   });
 });
