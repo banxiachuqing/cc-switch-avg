@@ -22,7 +22,11 @@ import SubscriptionQuotaFooter from "@/components/SubscriptionQuotaFooter";
 import CopilotQuotaFooter from "@/components/CopilotQuotaFooter";
 import CodexOauthQuotaFooter from "@/components/CodexOauthQuotaFooter";
 import XaiOauthQuotaFooter from "@/components/XaiOauthQuotaFooter";
-import { PROVIDER_TYPES, TEMPLATE_TYPES } from "@/config/constants";
+import {
+  AGGREGATE_PROVIDER_TYPE,
+  PROVIDER_TYPES,
+  TEMPLATE_TYPES,
+} from "@/config/constants";
 import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
@@ -80,6 +84,8 @@ interface ProviderCardProps {
   isRemovalProtected?: boolean;
   isStateChangeProtected?: boolean;
   onSetAsDefault?: (modelId?: string) => void;
+  // 聚合供应商:档位→来源供应商摘要(由 ProviderList 计算,空则不渲染摘要行)
+  aggregateSummary?: string;
 }
 
 /** 判断是否为官方供应商（无自定义 base URL / API key，直连官方 API） */
@@ -197,6 +203,7 @@ export function ProviderCard({
   isRemovalProtected,
   isStateChangeProtected,
   onSetAsDefault,
+  aggregateSummary,
 }: ProviderCardProps) {
   const { t } = useTranslation();
   const codexOfficialIdentity = resolveCodexOfficialIdentity(appId, provider);
@@ -305,6 +312,8 @@ export function ProviderCard({
       : provider.meta?.providerType === PROVIDER_TYPES.CODEX_OAUTH;
   // xAI OAuth (SuperGrok 反代)：额度经自管 OAuth token 自动显示，与 codex_oauth 同构
   const isXaiOauth = provider.meta?.providerType === PROVIDER_TYPES.XAI_OAUTH;
+  // 聚合供应商:本身无上游地址,按模型档绑定来源供应商,由本地代理按档路由
+  const isAggregate = provider.meta?.providerType === AGGREGATE_PROVIDER_TYPE;
   // 统一权威谓词（详见 providerNeedsRouting）：以 providerType 为准，不受
   // apiFormat 被改动/缺省影响。此 badge 仅在 Codex 视图渲染，故加 appId 守卫。
   const codexNeedsRouting =
@@ -444,6 +453,15 @@ export function ProviderCard({
                 <span className="inline-flex items-center rounded-md bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
                   Slim
                 </span>
+              )}
+
+              {isAggregate && (
+                <ProviderStatusBadge
+                  tone="info"
+                  label={t("provider.aggregate.badge", {
+                    defaultValue: "聚合",
+                  })}
+                />
               )}
 
               {appId === "claude-desktop" &&
@@ -595,6 +613,15 @@ export function ProviderCard({
                 <span className="min-w-0 truncate">{displayUrl}</span>
               </button>
             ) : null}
+
+            {isAggregate && aggregateSummary && (
+              <p
+                className="truncate text-xs text-muted-foreground"
+                title={aggregateSummary}
+              >
+                {aggregateSummary}
+              </p>
+            )}
           </div>
         </div>
 

@@ -49,6 +49,11 @@ import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { usePiCurrentState } from "@/lib/query/pi";
 import { isProxyAppId } from "@/config/appConfig";
+import { AGGREGATE_PROVIDER_TYPE } from "@/config/constants";
+import {
+  AGGREGATE_TIERS,
+  parseAggregateBindings,
+} from "@/components/providers/forms/AggregateBindingsFields";
 
 interface ProviderListProps {
   providers: Record<string, Provider>;
@@ -185,6 +190,27 @@ export function ProviderList({
       return failoverQueue.some((item) => item.providerId === providerId);
     },
     [isFailoverModeActive, failoverQueue],
+  );
+
+  // 聚合供应商摘要:按 AGGREGATE_TIERS 顺序拼接「档→来源供应商名」,
+  // 名称取自 providers 表,查不到时回退 providerId;非聚合/无绑定返回 undefined
+  const getAggregateSummary = useCallback(
+    (provider: Provider): string | undefined => {
+      if (provider.meta?.providerType !== AGGREGATE_PROVIDER_TYPE) {
+        return undefined;
+      }
+      const bindings = parseAggregateBindings(
+        JSON.stringify(provider.settingsConfig),
+      );
+      const parts = AGGREGATE_TIERS.flatMap((tier) => {
+        const binding = bindings[tier];
+        if (!binding) return [];
+        const name = providers[binding.providerId]?.name ?? binding.providerId;
+        return [`${tier}→${name}`];
+      });
+      return parts.length > 0 ? parts.join(" · ") : undefined;
+    },
+    [providers],
   );
 
   const handleToggleFailover = useCallback(
@@ -508,6 +534,7 @@ export function ProviderList({
                 isStateChangeProtected={
                   appId === "pi" && !isPiAuthoritativeStateReady
                 }
+                aggregateSummary={getAggregateSummary(provider)}
                 onSetAsDefault={
                   onSetAsDefault
                     ? (modelId) => onSetAsDefault(provider, modelId)
@@ -647,6 +674,7 @@ interface SortableProviderCardProps {
   isRemovalProtected?: boolean;
   isStateChangeProtected?: boolean;
   onSetAsDefault?: (modelId?: string) => void;
+  aggregateSummary?: string;
 }
 
 function SortableProviderCard({
@@ -679,6 +707,7 @@ function SortableProviderCard({
   isRemovalProtected,
   isStateChangeProtected,
   onSetAsDefault,
+  aggregateSummary,
 }: SortableProviderCardProps) {
   const {
     setNodeRef,
@@ -734,6 +763,7 @@ function SortableProviderCard({
         isRemovalProtected={isRemovalProtected}
         isStateChangeProtected={isStateChangeProtected}
         onSetAsDefault={onSetAsDefault}
+        aggregateSummary={aggregateSummary}
       />
     </div>
   );
