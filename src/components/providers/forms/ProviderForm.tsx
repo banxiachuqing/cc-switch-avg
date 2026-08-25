@@ -81,6 +81,13 @@ import { Label } from "@/components/ui/label";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
 import { BasicFormFields } from "./BasicFormFields";
 import { ClaudeFormFields } from "./ClaudeFormFields";
+import {
+  AggregateBindingsFields,
+  AGGREGATE_TIERS,
+  parseAggregateBindings,
+  synthesizeAggregateEnv,
+} from "./AggregateBindingsFields";
+import { AGGREGATE_PROVIDER_TYPE } from "@/config/constants";
 import { ClaudeDesktopProviderForm } from "./ClaudeDesktopProviderForm";
 import { GrokBuildProviderForm } from "./GrokBuildProviderForm";
 import { CodexFormFields } from "./CodexFormFields";
@@ -364,6 +371,13 @@ function ProviderFormFull({
     if (!supportsFullUrl) return false;
     return initialData?.meta?.isFullUrl ?? false;
   });
+
+  // 聚合供应商模式：仅 Claude；编辑已建聚合供应商时直接进入该模式（已建供应商不改类型）
+  const [aggregateMode, setAggregateMode] = useState(
+    () =>
+      appId === "claude" &&
+      initialData?.meta?.providerType === AGGREGATE_PROVIDER_TYPE,
+  );
 
   const [pricingConfig, setPricingConfig] = useState<{
     enabled: boolean;
@@ -1412,8 +1426,9 @@ function ProviderFormFull({
 
     // 非官方供应商端点 / API Key 空：A 类
     // cloud_provider（如 Bedrock）通过模板变量处理认证，跳过通用校验
+    // 聚合供应商本身不配上游地址和密钥（按档绑定来源），跳过端点/密钥检查
     if (category !== "official" && category !== "cloud_provider") {
-      if (appId === "claude") {
+      if (appId === "claude" && !aggregateMode) {
         if (
           !isClaudeCodexOauthProvider &&
           !isXaiOauthProvider &&
@@ -1469,6 +1484,31 @@ function ProviderFormFull({
             }),
           );
         }
+      }
+    }
+
+    // 聚合供应商：default 档必填兜底；已选来源的档必须填写上游模型名
+    // （parseAggregateBindings 会保留 model 暂空的部分档，此处 fail-fast，后端也会再校验）
+    if (aggregateMode) {
+      const bindings = parseAggregateBindings(values.settingsConfig);
+      const incompleteTier = AGGREGATE_TIERS.find(
+        (tier) => bindings[tier] && !bindings[tier]!.model.trim(),
+      );
+      if (!bindings.default) {
+        toast.error(
+          t("provider.aggregate.defaultRequired", {
+            defaultValue: "聚合供应商必须配置 default 档作为兜底",
+          }),
+        );
+        return;
+      }
+      if (incompleteTier) {
+        toast.error(
+          t("provider.aggregate.modelRequired", {
+            defaultValue: `请为 ${incompleteTier} 档填写上游模型名`,
+          }),
+        );
+        return;
       }
     }
 
@@ -1703,13 +1743,15 @@ function ProviderFormFull({
       delete baseMeta.custom_endpoints;
     }
 
-    const providerType = isCopilotProvider
-      ? "github_copilot"
-      : isClaudeCodexOauthProvider || isCodexOfficialManagedOauthBound
-        ? "codex_oauth"
-        : isXaiOauthProvider
-          ? "xai_oauth"
-          : undefined;
+    const providerType = aggregateMode
+      ? AGGREGATE_PROVIDER_TYPE
+      : isCopilotProvider
+        ? "github_copilot"
+        : isClaudeCodexOauthProvider || isCodexOfficialManagedOauthBound
+          ? "codex_oauth"
+          : isXaiOauthProvider
+            ? "xai_oauth"
+            : undefined;
 
     const nextMeta: ProviderMeta = {
       ...(baseMeta ?? {}),
@@ -2143,7 +2185,7 @@ function ProviderFormFull({
           onSubmit={form.handleSubmit(handleSubmit)}
           className="space-y-6 glass rounded-xl p-6 border border-white/10"
         >
-          {!initialData && (
+          {!initialData && !aggregateMode && (
             <ProviderPresetSelector
               selectedPresetId={selectedPresetId}
               presetEntries={presetEntries}
@@ -2153,6 +2195,36 @@ function ProviderFormFull({
               onManageUniversalProviders={onManageUniversalProviders}
               category={category}
             />
+          )}
+
+          {/* 聚合供应商开关：仅新建 Claude 供应商时可选；已建供应商不改类型 */}
+          {appId === "claude" && !initialData && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={aggregateMode}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setAggregateMode(on);
+                  if (on) {
+                    // 聚合模式取代预设：清掉已选预设，换成聚合骨架配置
+                    setSelectedPresetId("custom");
+                    setActivePreset(null);
+                    form.setValue(
+                      "settingsConfig",
+                      JSON.stringify(
+                        { env: synthesizeAggregateEnv({}), aggregate: {} },
+                        null,
+                        2,
+                      ),
+                    );
+                  }
+                }}
+              />
+              {t("provider.aggregate.typeLabel", {
+                defaultValue: "聚合供应商(按模型档聚合多个来源)",
+              })}
+            </label>
           )}
 
           <BasicFormFields
@@ -2358,84 +2430,94 @@ function ProviderFormFull({
             }
           />
 
-          {appId === "claude" && (
-            <ClaudeFormFields
-              providerId={providerId}
-              shouldShowApiKey={
-                (category !== "cloud_provider" ||
-                  hasApiKeyField(form.getValues("settingsConfig"), "claude")) &&
-                shouldShowApiKey(form.getValues("settingsConfig"), isEditMode)
-              }
-              apiKey={apiKey}
-              onApiKeyChange={handleApiKeyChange}
-              category={category}
-              shouldShowApiKeyLink={shouldShowClaudeApiKeyLink}
-              websiteUrl={claudeWebsiteUrl}
-              isPartner={isClaudePartner}
-              partnerPromotionKey={claudePartnerPromotionKey}
-              isCopilotPreset={isCopilotProvider}
-              isCodexOauthPreset={isClaudeCodexOauthProvider}
-              isXaiOauthPreset={isXaiOauthProvider}
-              usesOAuth={
-                templatePreset?.requiresOAuth === true ||
-                isCopilotProvider ||
-                isClaudeCodexOauthProvider ||
-                isXaiOauthProvider
-              }
-              isCopilotAuthenticated={isCopilotAuthenticated}
-              selectedGitHubAccountId={selectedGitHubAccountId}
-              onGitHubAccountSelect={setSelectedGitHubAccountId}
-              onManageAuthAccounts={onManageAuthAccounts}
-              isCodexOauthAuthenticated={isCodexOauthAuthenticated}
-              selectedCodexAccountId={selectedCodexAccountId}
-              onCodexAccountSelect={setSelectedCodexAccountId}
-              codexFastMode={codexFastMode}
-              onCodexFastModeChange={setCodexFastMode}
-              isXaiOauthAuthenticated={isXaiOauthAuthenticated}
-              selectedXaiAccountId={selectedXaiAccountId}
-              onXaiAccountSelect={setSelectedXaiAccountId}
-              templateValueEntries={templateValueEntries}
-              templateValues={templateValues}
-              templatePresetName={templatePreset?.name || ""}
-              onTemplateValueChange={handleTemplateValueChange}
-              shouldShowSpeedTest={shouldShowSpeedTest}
-              baseUrl={baseUrl}
-              onBaseUrlChange={handleClaudeBaseUrlChange}
-              isEndpointModalOpen={isEndpointModalOpen}
-              onEndpointModalToggle={setIsEndpointModalOpen}
-              onCustomEndpointsChange={
-                isEditMode ? undefined : setDraftCustomEndpoints
-              }
-              autoSelect={endpointAutoSelect}
-              onAutoSelectChange={setEndpointAutoSelect}
-              showEndpointTools
-              shouldShowModelSelector={category !== "official"}
-              claudeModel={claudeModel}
-              defaultHaikuModel={defaultHaikuModel}
-              defaultHaikuModelName={defaultHaikuModelName}
-              defaultSonnetModel={defaultSonnetModel}
-              defaultSonnetModelName={defaultSonnetModelName}
-              defaultOpusModel={defaultOpusModel}
-              defaultOpusModelName={defaultOpusModelName}
-              defaultFableModel={defaultFableModel}
-              defaultFableModelName={defaultFableModelName}
-              subagentModel={subagentModel}
-              onModelChange={handleModelChange}
-              speedTestEndpoints={speedTestEndpoints}
-              apiFormat={localApiFormat}
-              onApiFormatChange={handleApiFormatChange}
-              apiKeyField={localApiKeyField}
-              onApiKeyFieldChange={handleApiKeyFieldChange}
-              isFullUrl={localIsFullUrl}
-              onFullUrlChange={setLocalIsFullUrl}
-              customUserAgent={customUserAgent}
-              onCustomUserAgentChange={setCustomUserAgent}
-              localProxyHeadersOverride={localProxyHeadersOverride}
-              onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
-              localProxyBodyOverride={localProxyBodyOverride}
-              onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
-            />
-          )}
+          {appId === "claude" &&
+            (aggregateMode ? (
+              <AggregateBindingsFields
+                settingsConfig={form.watch("settingsConfig")}
+                onConfigChange={handleSettingsConfigChange}
+                currentProviderId={providerId}
+              />
+            ) : (
+              <ClaudeFormFields
+                providerId={providerId}
+                shouldShowApiKey={
+                  (category !== "cloud_provider" ||
+                    hasApiKeyField(
+                      form.getValues("settingsConfig"),
+                      "claude",
+                    )) &&
+                  shouldShowApiKey(form.getValues("settingsConfig"), isEditMode)
+                }
+                apiKey={apiKey}
+                onApiKeyChange={handleApiKeyChange}
+                category={category}
+                shouldShowApiKeyLink={shouldShowClaudeApiKeyLink}
+                websiteUrl={claudeWebsiteUrl}
+                isPartner={isClaudePartner}
+                partnerPromotionKey={claudePartnerPromotionKey}
+                isCopilotPreset={isCopilotProvider}
+                isCodexOauthPreset={isClaudeCodexOauthProvider}
+                isXaiOauthPreset={isXaiOauthProvider}
+                usesOAuth={
+                  templatePreset?.requiresOAuth === true ||
+                  isCopilotProvider ||
+                  isClaudeCodexOauthProvider ||
+                  isXaiOauthProvider
+                }
+                isCopilotAuthenticated={isCopilotAuthenticated}
+                selectedGitHubAccountId={selectedGitHubAccountId}
+                onGitHubAccountSelect={setSelectedGitHubAccountId}
+                onManageAuthAccounts={onManageAuthAccounts}
+                isCodexOauthAuthenticated={isCodexOauthAuthenticated}
+                selectedCodexAccountId={selectedCodexAccountId}
+                onCodexAccountSelect={setSelectedCodexAccountId}
+                codexFastMode={codexFastMode}
+                onCodexFastModeChange={setCodexFastMode}
+                isXaiOauthAuthenticated={isXaiOauthAuthenticated}
+                selectedXaiAccountId={selectedXaiAccountId}
+                onXaiAccountSelect={setSelectedXaiAccountId}
+                templateValueEntries={templateValueEntries}
+                templateValues={templateValues}
+                templatePresetName={templatePreset?.name || ""}
+                onTemplateValueChange={handleTemplateValueChange}
+                shouldShowSpeedTest={shouldShowSpeedTest}
+                baseUrl={baseUrl}
+                onBaseUrlChange={handleClaudeBaseUrlChange}
+                isEndpointModalOpen={isEndpointModalOpen}
+                onEndpointModalToggle={setIsEndpointModalOpen}
+                onCustomEndpointsChange={
+                  isEditMode ? undefined : setDraftCustomEndpoints
+                }
+                autoSelect={endpointAutoSelect}
+                onAutoSelectChange={setEndpointAutoSelect}
+                showEndpointTools
+                shouldShowModelSelector={category !== "official"}
+                claudeModel={claudeModel}
+                defaultHaikuModel={defaultHaikuModel}
+                defaultHaikuModelName={defaultHaikuModelName}
+                defaultSonnetModel={defaultSonnetModel}
+                defaultSonnetModelName={defaultSonnetModelName}
+                defaultOpusModel={defaultOpusModel}
+                defaultOpusModelName={defaultOpusModelName}
+                defaultFableModel={defaultFableModel}
+                defaultFableModelName={defaultFableModelName}
+                subagentModel={subagentModel}
+                onModelChange={handleModelChange}
+                speedTestEndpoints={speedTestEndpoints}
+                apiFormat={localApiFormat}
+                onApiFormatChange={handleApiFormatChange}
+                apiKeyField={localApiKeyField}
+                onApiKeyFieldChange={handleApiKeyFieldChange}
+                isFullUrl={localIsFullUrl}
+                onFullUrlChange={setLocalIsFullUrl}
+                customUserAgent={customUserAgent}
+                onCustomUserAgentChange={setCustomUserAgent}
+                localProxyHeadersOverride={localProxyHeadersOverride}
+                onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
+                localProxyBodyOverride={localProxyBodyOverride}
+                onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+              />
+            ))}
 
           {appId === "codex" && (
             <CodexFormFields
