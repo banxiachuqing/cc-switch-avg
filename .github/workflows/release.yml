@@ -349,17 +349,8 @@ jobs:
           echo "macOS zip ready: $NEW_ZIP"
 
           # 3) Create styled DMG with create-dmg (Tauri's built-in DMG styling doesn't work on CI)
-          # 有 Apple 证书时必须提供签名 identity；无证书时构建未签名 DMG（跳过 codesign）
-          set +u
-          DMG_CODESIGN_ARGS=()
-          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            DMG_CODESIGN_ARGS=(--codesign "$APPLE_SIGNING_IDENTITY")
-          elif [ -n "${{ secrets.APPLE_CERTIFICATE }}" ]; then
-            echo "❌ APPLE_SIGNING_IDENTITY is missing before DMG creation" >&2
-            exit 1
-          fi
-          set -u
-
+          # 有 Apple 证书时必须提供签名 identity；无证书时构建未签名 DMG（跳过 codesign）。
+          # 不用数组传参：macOS 自带 bash 3.2 在 set -u 下空数组展开会报 unbound variable。
           HOMEBREW_NO_AUTO_UPDATE=1 brew install create-dmg
           NEW_DMG="CC-Switch-${VERSION}-macOS.dmg"
           DMG_STAGE_DIR="$RUNNER_TEMP/dmg-stage"
@@ -367,19 +358,38 @@ jobs:
           mkdir -p "$DMG_STAGE_DIR"
           ditto "$APP_PATH" "$DMG_STAGE_DIR/CC Switch.app"
 
-          create-dmg \
-            --volname "CC Switch" \
-            --background "src-tauri/icons/dmg-background.png" \
-            --window-size 660 400 \
-            --window-pos 200 120 \
-            --icon-size 80 \
-            --icon "CC Switch.app" 180 220 \
-            --hide-extension "CC Switch.app" \
-            --app-drop-link 480 220 \
-            "${DMG_CODESIGN_ARGS[@]}" \
-            --no-internet-enable \
-            "release-assets/$NEW_DMG" \
-            "$DMG_STAGE_DIR"
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            create-dmg \
+              --volname "CC Switch" \
+              --background "src-tauri/icons/dmg-background.png" \
+              --window-size 660 400 \
+              --window-pos 200 120 \
+              --icon-size 80 \
+              --icon "CC Switch.app" 180 220 \
+              --hide-extension "CC Switch.app" \
+              --app-drop-link 480 220 \
+              --codesign "$APPLE_SIGNING_IDENTITY" \
+              --no-internet-enable \
+              "release-assets/$NEW_DMG" \
+              "$DMG_STAGE_DIR"
+          else
+            if [ -n "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+              echo "❌ APPLE_SIGNING_IDENTITY is missing before DMG creation" >&2
+              exit 1
+            fi
+            create-dmg \
+              --volname "CC Switch" \
+              --background "src-tauri/icons/dmg-background.png" \
+              --window-size 660 400 \
+              --window-pos 200 120 \
+              --icon-size 80 \
+              --icon "CC Switch.app" 180 220 \
+              --hide-extension "CC Switch.app" \
+              --app-drop-link 480 220 \
+              --no-internet-enable \
+              "release-assets/$NEW_DMG" \
+              "$DMG_STAGE_DIR"
+          fi
 
           rm -rf "$DMG_STAGE_DIR"
           echo "✅ Styled DMG created: $NEW_DMG"

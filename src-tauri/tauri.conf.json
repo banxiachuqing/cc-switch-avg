@@ -46,7 +46,8 @@
     ],
     "windows": {
       "wix": {
-        "template": "wix/per-user-main.wxs"
+        "template": "wix/per-user-main.wxs",
+        "version": "3.20.0.1"
       }
     },
     "macOS": {
@@ -56,7 +57,9 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["ccswitch"]
+        "schemes": [
+          "ccswitch"
+        ]
       }
     },
     "updater": {
