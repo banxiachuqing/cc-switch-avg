@@ -52,6 +52,9 @@ export const handlers = [
     return success(getProviders(app));
   }),
 
+  // 默认无聚合供应商引用；被引用场景由用例通过 server.use 覆盖
+  http.post(`${TAURI_ENDPOINT}/get_aggregate_references`, () => success([])),
+
   http.post(`${TAURI_ENDPOINT}/get_current_provider`, async ({ request }) => {
     const { app } = await withJson<{ app: AppId }>(request);
     return success(getCurrentProviderId(app));

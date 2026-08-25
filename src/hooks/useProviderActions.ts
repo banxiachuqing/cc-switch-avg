@@ -352,8 +352,8 @@ export function useProviderActions(
 
   // 删除供应商
   const deleteProvider = useCallback(
-    async (id: string) => {
-      await deleteProviderMutation.mutateAsync(id);
+    async (id: string, cascade?: boolean) => {
+      await deleteProviderMutation.mutateAsync({ providerId: id, cascade });
     },
     [deleteProviderMutation],
   );

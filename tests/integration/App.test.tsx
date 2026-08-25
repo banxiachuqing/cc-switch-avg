@@ -122,9 +122,10 @@ vi.mock("@/components/UsageScriptModal", () => ({
 }));
 
 vi.mock("@/components/ConfirmDialog", () => ({
-  ConfirmDialog: ({ isOpen, message, onConfirm, onCancel }: any) =>
+  ConfirmDialog: ({ isOpen, title, message, onConfirm, onCancel }: any) =>
     isOpen ? (
       <div data-testid="confirm-dialog">
+        <div data-testid="confirm-title">{title}</div>
         <div data-testid="confirm-message">{message}</div>
         <button onClick={() => onConfirm()}>confirm-delete</button>
         <button onClick={() => onCancel()}>cancel-delete</button>
@@ -393,6 +394,95 @@ describe("App integration with MSW", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument(),
     );
+  });
+
+  it("shows aggregate references and deletes with cascade when provider is referenced", async () => {
+    const deleteSpy = vi.spyOn(providersApi, "delete");
+    server.use(
+      http.post("http://tauri.local/get_aggregate_references", () =>
+        HttpResponse.json([
+          {
+            aggregateProviderId: "agg-1",
+            aggregateProviderName: "聚合一号",
+            tiers: ["sonnet", "haiku"],
+            includesDefault: false,
+          },
+          {
+            aggregateProviderId: "agg-2",
+            aggregateProviderName: "聚合二号",
+            tiers: ["default"],
+            includesDefault: true,
+          },
+        ]),
+      ),
+    );
+
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "claude-1",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("delete"));
+
+    // 聚合引用确认变体：标题 + 每个聚合供应商名与档位 + default 引用提示
+    await waitFor(() =>
+      expect(screen.getByTestId("confirm-title")).toHaveTextContent(
+        "删除被引用的供应商",
+      ),
+    );
+    const message = screen.getByTestId("confirm-message");
+    expect(message).toHaveTextContent("聚合一号");
+    expect(message).toHaveTextContent("聚合二号");
+    expect(message).toHaveTextContent("sonnet");
+    expect(message).toHaveTextContent("haiku");
+    expect(message).toHaveTextContent("请先编辑对应聚合供应商");
+
+    fireEvent.click(screen.getByText("confirm-delete"));
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalled());
+    expect(deleteSpy).toHaveBeenCalledWith("claude-1", "claude", true);
+    await waitFor(() =>
+      expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument(),
+    );
+    deleteSpy.mockRestore();
+  });
+
+  it("keeps the normal delete confirm flow when no aggregate references exist", async () => {
+    const deleteSpy = vi.spyOn(providersApi, "delete");
+    server.use(
+      http.post("http://tauri.local/get_aggregate_references", () =>
+        HttpResponse.json([]),
+      ),
+    );
+
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "claude-1",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("delete"));
+
+    // 无引用时走既有删除确认（文案不含聚合提示）
+    await waitFor(() =>
+      expect(screen.getByTestId("confirm-title")).toHaveTextContent(
+        "confirm.deleteProvider",
+      ),
+    );
+    expect(screen.getByTestId("confirm-message")).toHaveTextContent(
+      "confirm.deleteProviderMessage",
+    );
+
+    fireEvent.click(screen.getByText("confirm-delete"));
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalled());
+    expect(deleteSpy).toHaveBeenCalledWith("claude-1", "claude", undefined);
+    deleteSpy.mockRestore();
   });
 
   it("shows toast when duplicate cannot load live provider ids", async () => {

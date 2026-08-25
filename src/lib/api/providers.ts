@@ -12,6 +12,14 @@ export interface ProviderSortUpdate {
   sortIndex: number;
 }
 
+/** 一个聚合供应商对某供应商的引用（后端 get_aggregate_references 返回值） */
+export interface AggregateReference {
+  aggregateProviderId: string;
+  aggregateProviderName: string;
+  tiers: string[];
+  includesDefault: boolean;
+}
+
 export interface ProviderSwitchEvent {
   appType: AppId;
   providerId: string;
@@ -75,8 +83,22 @@ export const providersApi = {
     });
   },
 
-  async delete(id: string, appId: AppId): Promise<boolean> {
-    return await invoke("delete_provider", { id, app: appId });
+  async delete(id: string, appId: AppId, cascade?: boolean): Promise<boolean> {
+    return await invoke("delete_provider", { id, app: appId, cascade });
+  },
+
+  /**
+   * 查询引用了指定供应商的聚合供应商及其档位绑定
+   * 删除前用于决定是否走聚合引用确认流程（cascade 删除）
+   */
+  async getAggregateReferences(
+    id: string,
+    appId: AppId,
+  ): Promise<AggregateReference[]> {
+    return await invoke("get_aggregate_references", {
+      app: appId,
+      providerId: id,
+    });
   },
 
   /**

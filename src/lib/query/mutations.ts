@@ -230,8 +230,14 @@ export const useDeleteProviderMutation = (appId: AppId) => {
   const { t } = useTranslation();
 
   return useMutation({
-    mutationFn: async (providerId: string) => {
-      await providersApi.delete(providerId, appId);
+    mutationFn: async ({
+      providerId,
+      cascade,
+    }: {
+      providerId: string;
+      cascade?: boolean;
+    }) => {
+      await providersApi.delete(providerId, appId, cascade);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });

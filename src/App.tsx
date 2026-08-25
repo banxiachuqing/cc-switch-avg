@@ -37,6 +37,7 @@ import {
   providersApi,
   settingsApi,
   type AppId,
+  type AggregateReference,
   type ProviderSwitchEvent,
 } from "@/lib/api";
 import { checkAllEnvConflicts, checkEnvConflicts } from "@/lib/api/env";
@@ -250,6 +251,11 @@ function App() {
   const [confirmAction, setConfirmAction] = useState<{
     provider: Provider;
     action: "remove" | "delete";
+  } | null>(null);
+  // 被聚合供应商引用时的删除确认（refs 非空时优先展示此变体）
+  const [aggregateDeleteRefs, setAggregateDeleteRefs] = useState<{
+    provider: Provider;
+    refs: AggregateReference[];
   } | null>(null);
   const [envConflicts, setEnvConflicts] = useState<EnvConflict[]>([]);
   const [showEnvBanner, setShowEnvBanner] = useState(false);
@@ -775,6 +781,33 @@ function App() {
     setConfirmAction(null);
   };
 
+  // 删除预检查：被聚合供应商引用时先展示聚合引用确认（确认后 cascade 删除），
+  // 否则直接走既有删除确认流程
+  const handleRequestDelete = async (provider: Provider) => {
+    try {
+      const refs = await providersApi.getAggregateReferences(
+        provider.id,
+        activeApp,
+      );
+      if (refs.length > 0) {
+        setAggregateDeleteRefs({ provider, refs });
+        return;
+      }
+    } catch (error) {
+      // 预检查失败不阻塞删除：回退到普通删除确认
+      console.warn("[App] Failed to check aggregate references", error);
+    }
+    setConfirmAction({ provider, action: "delete" });
+  };
+
+  const handleConfirmAggregateDelete = async () => {
+    if (!aggregateDeleteRefs) return;
+    const { provider } = aggregateDeleteRefs;
+    // default 档引用后端仍会拒绝，错误经 mutation onError toast 展示
+    await deleteProvider(provider.id, true);
+    setAggregateDeleteRefs(null);
+  };
+
   const generateUniqueProviderCopyKey = (
     originalKey: string,
     existingKeys: string[],
@@ -913,6 +946,27 @@ function App() {
       ? `${message}\n\n${t("confirm.piDefaultProviderWarning")}`
       : message;
   }, [activeApp, confirmAction, piCurrentState?.defaultProviderId, t]);
+
+  const aggregateDeleteMessage = useMemo(() => {
+    if (!aggregateDeleteRefs) return "";
+
+    const { refs } = aggregateDeleteRefs;
+    const lines = refs.map((ref) => {
+      const tierText =
+        ref.tiers.length > 0 ? `（${ref.tiers.join("、")}）` : "";
+      return `${ref.aggregateProviderName}${tierText}`;
+    });
+    let message = t("provider.aggregate.deleteReferencedMessage", {
+      defaultValue: "该供应商正被以下聚合供应商引用：\n{{refs}}",
+      refs: lines.join("\n"),
+    });
+    if (refs.some((ref) => ref.includesDefault)) {
+      message += `\n\n${t("provider.aggregate.deleteReferencedDefaultNote", {
+        defaultValue: "其中有默认档位引用，请先编辑对应聚合供应商后再删除。",
+      })}`;
+    }
+    return message;
+  }, [aggregateDeleteRefs, t]);
 
   const handleOpenTerminal = async (provider: Provider) => {
     try {
@@ -1119,7 +1173,7 @@ function App() {
                         setEditingProvider(provider);
                       }}
                       onDelete={(provider) =>
-                        setConfirmAction({ provider, action: "delete" })
+                        void handleRequestDelete(provider)
                       }
                       onRemoveFromConfig={
                         activeApp === "opencode" ||
@@ -1796,6 +1850,16 @@ function App() {
         message={confirmActionMessage}
         onConfirm={() => void handleConfirmAction()}
         onCancel={() => setConfirmAction(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={Boolean(aggregateDeleteRefs)}
+        title={t("provider.aggregate.deleteReferencedTitle", {
+          defaultValue: "删除被引用的供应商",
+        })}
+        message={aggregateDeleteMessage}
+        onConfirm={() => void handleConfirmAggregateDelete()}
+        onCancel={() => setAggregateDeleteRefs(null)}
       />
 
       <ConfirmDialog

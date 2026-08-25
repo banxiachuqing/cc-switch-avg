@@ -584,7 +584,10 @@ describe("useProviderActions", () => {
       await result.current.deleteProvider("provider-2");
     });
 
-    expect(deleteProviderMutateAsync).toHaveBeenCalledWith("provider-2");
+    expect(deleteProviderMutateAsync).toHaveBeenCalledWith({
+      providerId: "provider-2",
+      cascade: undefined,
+    });
   });
 
   it("should update provider and refresh cache when saveUsageScript succeeds", async () => {
