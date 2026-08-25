@@ -5,6 +5,20 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.20.0-fork.1] - 2026-08-25
+
+Fork 首发版（基于上游 v3.20.0）。新增 **Claude 聚合供应商**：Claude Code 的 5+1 个模型档（default / opus / sonnet / haiku / fable / subagent）可以分别绑定不同来源供应商的不同模型，由本地代理按请求模型名关键字分类路由到对应上游——opus 走甲家的模型、fable 走乙家的模型、haiku 走甲家另一模型。聚合供应商本身不持有凭证，作为「当前供应商」切换后由代理接管；default 档必填，未配置档与未知模型名回退 default；绑定供应商失败直接返回原始错误，不跨档回退；用量按实际上游供应商归因。删除被引用的供应商会先列出引用关系（非 default 档确认后级联清除绑定，default 档引用阻止删除）。零数据库迁移。
+
+**Stats**: 16 commits | 24 files changed | +2,700 insertions | -25 deletions
+
+### Added
+
+- **Claude 聚合供应商（跨供应商模型路由）**：新增聚合供应商类型，供应商表单中以档位表格绑定每个模型档的来源供应商与上游模型名，保存时校验 default 档必填、来源供应商存在且非聚合/官方/自身。供应商卡片显示「聚合」徽标与各档来源摘要；切换时提示需要代理并自动把 live 配置的 `ANTHROPIC_BASE_URL` 指向本地代理。删除被引用的普通供应商时弹出聚合引用确认框，确认后清除非 default 档绑定并删除；default 档引用则阻止删除。界面文案支持 zh / zh-TW / en / ja。
+
+### Changed
+
+- 本地代理请求路径新增 `pre_mapped` 直通：聚合路由的绑定模型名为显式值，跳过来源供应商自身的模型档映射，但 thinking 归一化、`[1M]` 标记剥离等通用处理照常执行。
+
 ## [3.20.0] - 2026-08-18
 
 Development since v3.19.2 spans every subsystem, led by three structural additions. Pi becomes the ninth managed app (#6064): provider management over `~/.pi/agent/models.json` with 58 presets, a prompt library with system-prompt and slash-command editors, Skills, a session browser, and — behind a schema migration (`SCHEMA_VERSION` 16 → 17, the first new table since v12 introduced profiles) — session usage imported into the dashboard (#6463). Codex gains real multi-account ChatGPT management (#3879): sign in to several accounts in the Auth Center, bind each provider card to one of them or let it follow the CLI's own login, and switch between them like any other provider — with official cards deliberately leaving auto-failover so a retry can never bill a different account. And Claude Code's built-in WebSearch now works when routed to a Responses provider or the Codex OAuth backend, alongside proxy support for Codex's standalone Alpha Search endpoint (#5681). The urgent fix is for Windows-with-WSL users: v3.19.2's switch to `ReplaceFileW` failed on `\\wsl.localhost` paths with an error the fallback did not catch, so existing configurations could not be updated or switched (#6232) — this release repairs it and adds real WSL2 filesystems to CI (#6233). The same Windows wave overhauls CLI detection to read the registry PATH and standalone installer directories, fixing a five-issue family of "not installed" and stale-version reports (#6284), eliminates the white/black startup flash (#6252), and stops the MSI from writing a garbage registry key it had been writing since v3.4.0 (#6283). Codex reasoning control gets a full pass: per-model reasoning levels in the model catalog (#6228), vendor-documented tiers pre-filled across the presets, and corrected thinking-switch dialects for the aggregator platforms that had been receiving fields their gateways never accepted. A contributor's backup/sync audit lands as two hardening waves — SQL dumps that round-trip every value and refuse truncated imports (#6146), and restores that rebuild every derived file and run strictly one at a time (#6147). Rounding it out: a sweeping provider-form consistency pass, an IME fix that stops macOS Chinese/Japanese input from corrupting form fields (#6308), and DeepSeek V4 repriced to the vendor's new peak-tier rates.
