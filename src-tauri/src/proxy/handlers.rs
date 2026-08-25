@@ -199,6 +199,20 @@ async fn handle_messages_for_app(
         .and_then(|s| s.as_bool())
         .unwrap_or(false);
 
+    // 聚合供应商:按模型档位把请求改路由到绑定的来源供应商。
+    // 检查的是「当前供应商」而非故障转移队列结果,因此队列对聚合供应商不生效。
+    let mut body = body;
+    let mut providers = ctx.get_providers();
+    let mut pre_mapped = false;
+    if let Some(route) =
+        crate::proxy::aggregate::override_route_for_aggregate(&state.db, &app_type, &body)
+            .map_err(|e| ProxyError::ConfigError(e.to_string()))?
+    {
+        body = route.body;
+        providers = vec![route.provider];
+        pre_mapped = true;
+    }
+
     // 转发请求
     let forwarder = ctx.create_forwarder(&state);
     let mut result = match forwarder
@@ -209,7 +223,8 @@ async fn handle_messages_for_app(
             body.clone(),
             headers,
             extensions,
-            ctx.get_providers(),
+            providers,
+            pre_mapped,
         )
         .await
     {
@@ -795,6 +810,7 @@ pub async fn handle_chat_completions(
             headers,
             extensions,
             ctx.get_providers(),
+            false,
         )
         .await
     {
@@ -890,6 +906,7 @@ async fn handle_responses_for_app(
             headers,
             extensions,
             ctx.get_providers(),
+            false,
         )
         .await
     {
@@ -1006,6 +1023,7 @@ pub async fn handle_alpha_search(
             headers,
             extensions,
             ctx.get_providers(),
+            false,
         )
         .await
     {
@@ -1089,6 +1107,7 @@ async fn handle_responses_compact_for_app(
             headers,
             extensions,
             ctx.get_providers(),
+            false,
         )
         .await
     {
@@ -2098,6 +2117,7 @@ pub async fn handle_gemini(
             headers,
             extensions,
             ctx.get_providers(),
+            false,
         )
         .await
     {

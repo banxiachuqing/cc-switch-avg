@@ -452,6 +452,21 @@ mod tests {
 
     #[test]
     #[serial]
+    fn override_returns_none_for_normal_current_provider() {
+        let _home = TempHome::new();
+        let plain = source_provider("a");
+        let db = setup_db(&plain, &[]);
+        assert!(override_route_for_aggregate(
+            &db,
+            &AppType::Claude,
+            &json!({"model": "claude-opus-4-5"})
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    #[serial]
     fn override_ignores_failover_queue_when_current_is_aggregate() {
         let _home = TempHome::new();
         let agg = aggregate_provider(json!({

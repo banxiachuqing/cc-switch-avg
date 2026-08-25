@@ -376,6 +376,7 @@ impl RequestForwarder {
         headers: axum::http::HeaderMap,
         extensions: Extensions,
         providers: Vec<Provider>,
+        pre_mapped: bool,
     ) -> Result<ForwardResult, ForwardError> {
         let guard = ActiveConnectionGuard::acquire(self.status.clone()).await;
         {
@@ -385,7 +386,7 @@ impl RequestForwarder {
         }
         let result = self
             .forward_with_retry_inner(
-                app_type, method, endpoint, body, headers, extensions, providers,
+                app_type, method, endpoint, body, headers, extensions, providers, pre_mapped,
             )
             .await;
         // 把 guard 注入到 Ok 结果，让它随响应一起流转到 response_processor，
@@ -406,6 +407,7 @@ impl RequestForwarder {
     /// * `body` - 请求体
     /// * `headers` - 请求头
     /// * `providers` - 已选择的 Provider 列表（由 RequestContext 提供，避免重复调用 select_providers）
+    /// * `pre_mapped` - 请求体模型名已在 handler 层改写完成（聚合路由），跳过 provider 档位映射
     #[allow(clippy::too_many_arguments)]
     async fn forward_with_retry_inner(
         &self,
@@ -416,6 +418,7 @@ impl RequestForwarder {
         headers: axum::http::HeaderMap,
         extensions: Extensions,
         providers: Vec<Provider>,
+        pre_mapped: bool,
     ) -> Result<ForwardResult, ForwardError> {
         // 获取适配器
         let adapter = get_adapter(app_type).ok_or_else(|| ForwardError {
@@ -516,6 +519,7 @@ impl RequestForwarder {
                     &headers,
                     &extensions,
                     adapter.as_ref(),
+                    pre_mapped,
                 )
                 .await
             {
@@ -615,6 +619,7 @@ impl RequestForwarder {
                                     &headers,
                                     &extensions,
                                     adapter.as_ref(),
+                                    pre_mapped,
                                 )
                                 .await
                             {
@@ -761,6 +766,7 @@ impl RequestForwarder {
                                         &headers,
                                         &extensions,
                                         adapter.as_ref(),
+                                        pre_mapped,
                                     )
                                     .await
                                 {
@@ -927,6 +933,7 @@ impl RequestForwarder {
                                     &headers,
                                     &extensions,
                                     adapter.as_ref(),
+                                    pre_mapped,
                                 )
                                 .await
                             {
@@ -1151,6 +1158,7 @@ impl RequestForwarder {
         headers: &axum::http::HeaderMap,
         extensions: &Extensions,
         adapter: &dyn ProviderAdapter,
+        pre_mapped: bool,
     ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
         // 使用适配器提取 base_url
         let mut base_url = adapter.extract_base_url(provider)?;
@@ -1188,7 +1196,13 @@ impl RequestForwarder {
         // 应用模型映射（独立于格式转换）
         // Claude Desktop proxy 模式必须先把 Desktop 可见的 claude-* route
         // 映射成真实上游模型名，并且未知 route 要直接报错，不能使用默认模型兜底。
-        let mapped_body = if matches!(app_type, AppType::ClaudeDesktop) {
+        let mapped_body = if pre_mapped {
+            // 聚合路由已在 handler 层完成模型改写;绑定模型名是显式的,
+            // 必须绕过来源供应商自身的档位映射,否则会被其
+            // ANTHROPIC_MODEL 等 env 映射覆盖。[1M] 剥离等通用处理
+            // 在后续步骤照常执行。
+            body.clone()
+        } else if matches!(app_type, AppType::ClaudeDesktop) {
             crate::claude_desktop_config::map_proxy_request_model(body.clone(), provider)
                 .map_err(|e| ProxyError::InvalidRequest(e.to_string()))?
         } else {
