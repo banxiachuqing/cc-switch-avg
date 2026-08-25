@@ -265,14 +265,31 @@ pub fn override_route_for_aggregate(
     if !matches!(app_type, AppType::Claude) {
         return Ok(None);
     }
-    let current_id = crate::settings::get_effective_current_provider(db, app_type)
-        .ok()
-        .flatten()
-        .or_else(|| db.get_current_provider(app_type.as_str()).ok().flatten());
-    let Some(current) = current_id
-        .and_then(|id| db.get_provider_by_id(&id, app_type.as_str()).ok().flatten())
-        .filter(is_aggregate_provider)
-    else {
+    // 聚合路由的当前供应商查询必须 fail-open:任何 DB 错误都不应阻断代理请求,
+    // 但错误不能静默吞掉——记录日志便于排查。
+    let current_id = match crate::settings::get_effective_current_provider(db, app_type) {
+        Ok(Some(id)) => Some(id),
+        Ok(None) => db
+            .get_current_provider(app_type.as_str())
+            .unwrap_or_else(|e| {
+                log::warn!("聚合路由读取当前供应商失败: {e}");
+                None
+            }),
+        Err(e) => {
+            log::warn!("聚合路由读取当前供应商失败: {e}");
+            None
+        }
+    };
+    let Some(current) = (match current_id {
+        Some(id) => db
+            .get_provider_by_id(&id, app_type.as_str())
+            .unwrap_or_else(|e| {
+                log::warn!("聚合路由读取当前供应商失败: {e}");
+                None
+            })
+            .filter(is_aggregate_provider),
+        None => None,
+    }) else {
         return Ok(None);
     };
     resolve_route(db, &current, body)

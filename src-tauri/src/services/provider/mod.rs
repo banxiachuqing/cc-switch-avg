@@ -4910,6 +4910,19 @@ impl ProviderService {
                     format!("Provider is referenced by aggregate provider(s): {names}"),
                 ));
             }
+            // 当前供应商预检必须早于绑定清除:否则级联删除最终失败时,
+            // 聚合供应商的档位绑定已被静默清除,留下不一致状态。
+            // 仅拦截非累加模式且非 Pi 的应用,与下方保留的删除体检查同语义;
+            // 下方检查仍保留,兜底无引用场景。
+            if app_type != AppType::Pi && !app_type.is_additive_mode() {
+                let local_current = crate::settings::get_current_provider(&app_type);
+                let db_current = state.db.get_current_provider(app_type.as_str())?;
+                if local_current.as_deref() == Some(id) || db_current.as_deref() == Some(id) {
+                    return Err(AppError::Message(
+                        "无法删除当前正在使用的供应商".to_string(),
+                    ));
+                }
+            }
             aggregate::remove_bindings_to(&state.db, app_type.as_str(), id)?;
         }
         if app_type == AppType::Pi {
@@ -5168,16 +5181,23 @@ impl ProviderService {
             let (proxy_url, _) =
                 futures::executor::block_on(state.proxy_service.build_proxy_urls())
                     .map_err(AppError::Message)?;
-            if let Some(env) = injected
+            match injected
                 .settings_config
                 .as_object_mut()
                 .map(|root| root.entry("env").or_insert_with(|| serde_json::json!({})))
-                .and_then(Value::as_object_mut)
             {
-                env.insert(
-                    "ANTHROPIC_BASE_URL".to_string(),
-                    serde_json::Value::String(proxy_url),
-                );
+                Some(Value::Object(env)) => {
+                    env.insert(
+                        "ANTHROPIC_BASE_URL".to_string(),
+                        serde_json::Value::String(proxy_url),
+                    );
+                }
+                Some(_) => {
+                    log::warn!(
+                        "聚合供应商 {id} 的 env 配置不是 JSON 对象,跳过 ANTHROPIC_BASE_URL 注入"
+                    );
+                }
+                None => {}
             }
             injected
         } else {
