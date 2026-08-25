@@ -278,6 +278,108 @@ pub fn override_route_for_aggregate(
     resolve_route(db, &current, body)
 }
 
+/// 一处引用:哪个聚合供应商的哪些档位引用了某供应商
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AggregateReference {
+    pub aggregate_provider_id: String,
+    pub aggregate_provider_name: String,
+    pub tiers: Vec<String>,
+    pub includes_default: bool,
+}
+
+/// 查找引用了 provider_id 的所有聚合供应商绑定
+pub fn find_aggregate_references(
+    db: &Database,
+    app_type: &str,
+    provider_id: &str,
+) -> Result<Vec<AggregateReference>, AppError> {
+    let all = db.get_all_providers(app_type)?;
+    let mut refs = Vec::new();
+    for (id, provider) in all.iter() {
+        if !is_aggregate_provider(provider) {
+            continue;
+        }
+        let Some(bindings) = AggregateBindings::from_provider(provider) else {
+            continue;
+        };
+        let mut tiers = Vec::new();
+        let mut includes_default = false;
+        if bindings
+            .default
+            .as_ref()
+            .is_some_and(|b| b.provider_id == provider_id)
+        {
+            tiers.push("default".to_string());
+            includes_default = true;
+        }
+        for (tier, binding) in [
+            ("opus", &bindings.opus),
+            ("sonnet", &bindings.sonnet),
+            ("haiku", &bindings.haiku),
+            ("fable", &bindings.fable),
+            ("subagent", &bindings.subagent),
+        ] {
+            if binding
+                .as_ref()
+                .is_some_and(|b| b.provider_id == provider_id)
+            {
+                tiers.push(tier.to_string());
+            }
+        }
+        if !tiers.is_empty() {
+            refs.push(AggregateReference {
+                aggregate_provider_id: id.clone(),
+                aggregate_provider_name: provider.name.clone(),
+                tiers,
+                includes_default,
+            });
+        }
+    }
+    Ok(refs)
+}
+
+/// 从所有聚合供应商中移除对 provider_id 的非 default 档绑定。
+/// default 档引用必须由调用方先行阻止(否则聚合供应商会失去兜底)。
+/// 返回清除的绑定数量。
+pub fn remove_bindings_to(
+    db: &Database,
+    app_type: &str,
+    provider_id: &str,
+) -> Result<usize, AppError> {
+    let all = db.get_all_providers(app_type)?;
+    let mut removed = 0usize;
+    for (_, provider) in all.iter() {
+        if !is_aggregate_provider(provider) {
+            continue;
+        }
+        let Some(mut bindings) = AggregateBindings::from_provider(provider) else {
+            continue;
+        };
+        let mut dirty = false;
+        for slot in [
+            &mut bindings.opus,
+            &mut bindings.sonnet,
+            &mut bindings.haiku,
+            &mut bindings.fable,
+            &mut bindings.subagent,
+        ] {
+            if slot.as_ref().is_some_and(|b| b.provider_id == provider_id) {
+                *slot = None;
+                removed += 1;
+                dirty = true;
+            }
+        }
+        if dirty {
+            let mut updated = provider.clone();
+            updated.settings_config["aggregate"] = serde_json::to_value(&bindings)
+                .map_err(|e| AppError::JsonSerialize { source: e })?;
+            db.save_provider(app_type, &updated)?;
+        }
+    }
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -640,5 +742,51 @@ mod tests {
             "opus": {"providerId": "a", "model": "a-opus"}
         }));
         assert!(validate_bindings(&db, "claude", "agg", &good).is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn find_references_reports_tiers_and_default_flag() {
+        let _home = TempHome::new();
+        let agg = aggregate_provider(json!({
+            "default": {"providerId": "a", "model": "a-default"},
+            "opus": {"providerId": "b", "model": "b-opus"},
+            "haiku": {"providerId": "b", "model": "b-haiku"}
+        }));
+        let db = setup_db(&agg, &[source_provider("a"), source_provider("b")]);
+
+        let refs = find_aggregate_references(&db, "claude", "b").unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].aggregate_provider_id, "agg");
+        assert_eq!(refs[0].tiers, vec!["opus", "haiku"]);
+        assert!(!refs[0].includes_default);
+
+        let refs = find_aggregate_references(&db, "claude", "a").unwrap();
+        assert_eq!(refs.len(), 1);
+        assert!(refs[0].includes_default);
+
+        assert!(find_aggregate_references(&db, "claude", "nobody")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    #[serial]
+    fn remove_bindings_clears_only_non_default_tiers() {
+        let _home = TempHome::new();
+        let agg = aggregate_provider(json!({
+            "default": {"providerId": "a", "model": "a-default"},
+            "opus": {"providerId": "b", "model": "b-opus"},
+            "haiku": {"providerId": "b", "model": "b-haiku"}
+        }));
+        let db = setup_db(&agg, &[source_provider("a"), source_provider("b")]);
+
+        let removed = remove_bindings_to(&db, "claude", "b").unwrap();
+        assert_eq!(removed, 2);
+        let after = db.get_provider_by_id("agg", "claude").unwrap().unwrap();
+        let bindings = AggregateBindings::from_provider(&after).unwrap();
+        assert!(bindings.opus.is_none());
+        assert!(bindings.haiku.is_none());
+        assert!(bindings.default.is_some());
     }
 }

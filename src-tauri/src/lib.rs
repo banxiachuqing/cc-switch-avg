@@ -1365,6 +1365,7 @@ pub fn run() {
             commands::add_provider,
             commands::update_provider,
             commands::delete_provider,
+            commands::get_aggregate_references,
             commands::remove_provider_from_live_config,
             commands::switch_provider,
             commands::import_default_config,

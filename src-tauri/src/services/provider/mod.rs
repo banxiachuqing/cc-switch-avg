@@ -4818,6 +4818,45 @@ impl ProviderService {
     /// 同时检查本地 settings 和数据库的当前供应商，防止删除任一端正在使用的供应商。
     /// 对于累加模式应用（OpenCode, OpenClaw），可以随时删除任意供应商，同时从 live 配置中移除。
     pub fn delete(state: &AppState, app_type: AppType, id: &str) -> Result<(), AppError> {
+        Self::delete_with_cascade(state, app_type, id, false)
+    }
+
+    /// cascade = true 时清除聚合供应商对该供应商的非 default 档绑定后再删除;
+    /// default 档引用始终阻止删除(需先编辑聚合供应商)。
+    pub fn delete_with_cascade(
+        state: &AppState,
+        app_type: AppType,
+        id: &str,
+        cascade: bool,
+    ) -> Result<(), AppError> {
+        use crate::proxy::aggregate;
+        let refs = aggregate::find_aggregate_references(&state.db, app_type.as_str(), id)?;
+        if !refs.is_empty() {
+            let names = refs
+                .iter()
+                .map(|r| r.aggregate_provider_name.as_str())
+                .collect::<Vec<_>>()
+                .join("、");
+            if refs.iter().any(|r| r.includes_default) {
+                return Err(AppError::localized(
+                    "provider.referenced_by_aggregate_default",
+                    format!(
+                        "该供应商是聚合供应商「{names}」的 default 档来源,请先修改对应聚合供应商"
+                    ),
+                    format!(
+                        "Provider is the default tier source of aggregate provider(s): {names}"
+                    ),
+                ));
+            }
+            if !cascade {
+                return Err(AppError::localized(
+                    "provider.referenced_by_aggregate",
+                    format!("该供应商被聚合供应商「{names}」引用"),
+                    format!("Provider is referenced by aggregate provider(s): {names}"),
+                ));
+            }
+            aggregate::remove_bindings_to(&state.db, app_type.as_str(), id)?;
+        }
         if app_type == AppType::Pi {
             return pi::delete(state, id);
         }

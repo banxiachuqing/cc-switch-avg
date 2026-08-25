@@ -79,11 +79,27 @@ pub fn delete_provider(
     state: State<'_, AppState>,
     app: String,
     id: String,
+    #[allow(non_snake_case)] cascade: Option<bool>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::delete(state.inner(), app_type, &id)
+    ProviderService::delete_with_cascade(state.inner(), app_type, &id, cascade.unwrap_or(false))
         .map(|_| true)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_aggregate_references(
+    state: State<'_, AppState>,
+    app: String,
+    #[allow(non_snake_case)] providerId: String,
+) -> Result<Vec<crate::proxy::aggregate::AggregateReference>, String> {
+    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
+    crate::proxy::aggregate::find_aggregate_references(
+        state.db.as_ref(),
+        app_type.as_str(),
+        &providerId,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
