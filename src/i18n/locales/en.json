@@ -177,7 +177,23 @@
         "apiKeyPlaceholder": "Enter Gemini API Key"
       }
     },
-    "duplicateLiveIdsLoadFailed": "Failed to read provider identifiers from config, please fix the config and try again"
+    "duplicateLiveIdsLoadFailed": "Failed to read provider identifiers from config, please fix the config and try again",
+    "aggregate": {
+      "typeLabel": "Aggregate provider (per-tier sourcing)",
+      "hint": "An aggregate provider has no upstream URL/key of its own; each model tier binds to a source provider. The default tier is required as fallback.",
+      "selectProvider": "Select source provider",
+      "modelName": "Upstream model name",
+      "defaultRequired": "Aggregate provider requires a default tier binding",
+      "modelRequired": "Please fill in the upstream model name for the {{tier}} tier",
+      "badge": "Aggregate",
+      "deleteReferencedTitle": "Provider referenced by aggregate provider",
+      "deleteReferencedMessage": "Deleting will also remove these aggregate bindings:\n{{refs}}",
+      "deleteReferencedDefaultNote": "It includes default tier references; please edit the corresponding aggregate provider first",
+      "tier": {
+        "default": "default (fallback)",
+        "subagent": "subagent"
+      }
+    }
   },
   "claudeCode": {
     "needsRouting": "Needs Routing",
@@ -291,7 +307,8 @@
     "windowControlFailed": "Window control failed: {{error}}",
     "officialBlockedByProxy": "Cannot switch to official provider while local routing is active. Using routing with official APIs may cause account bans.",
     "proxyOfficialWarning": "Current provider {{name}} is official. Consider switching to a third-party provider before using local routing.",
-    "proxyReasonClaudeDesktop": "Using Claude Desktop local routing mode"
+    "proxyReasonClaudeDesktop": "Using Claude Desktop local routing mode",
+    "proxyReasonAggregate": "uses cross-provider model aggregation"
   },
   "confirm": {
     "deleteProvider": "Delete Provider",

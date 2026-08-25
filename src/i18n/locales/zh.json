@@ -177,7 +177,23 @@
         "apiKeyPlaceholder": "请输入 Gemini API Key"
       }
     },
-    "duplicateLiveIdsLoadFailed": "读取配置中的供应商标识失败，请先修复配置后再试"
+    "duplicateLiveIdsLoadFailed": "读取配置中的供应商标识失败，请先修复配置后再试",
+    "aggregate": {
+      "typeLabel": "聚合供应商（按模型档聚合多个来源）",
+      "hint": "聚合供应商本身不配置上游地址和密钥；每个模型档分别绑定一个来源供应商。default 档必填，作为未配置档与未知模型的兜底。",
+      "selectProvider": "选择来源供应商",
+      "modelName": "上游模型名",
+      "defaultRequired": "聚合供应商必须配置 default 档作为兜底",
+      "modelRequired": "请为 {{tier}} 档填写上游模型名",
+      "badge": "聚合",
+      "deleteReferencedTitle": "该供应商被聚合供应商引用",
+      "deleteReferencedMessage": "删除后将同时清除以下聚合绑定：\n{{refs}}",
+      "deleteReferencedDefaultNote": "其中包含 default 档引用，请先编辑对应的聚合供应商",
+      "tier": {
+        "default": "default（兜底）",
+        "subagent": "subagent（子代理）"
+      }
+    }
   },
   "claudeCode": {
     "needsRouting": "需要路由",
@@ -291,7 +307,8 @@
     "windowControlFailed": "窗口控制失败：{{error}}",
     "officialBlockedByProxy": "本地路由模式下不能切换到官方供应商，使用路由访问官方 API 可能导致账号被封禁",
     "proxyOfficialWarning": "当前供应商 {{name}} 是官方供应商，建议切换到第三方供应商后再使用本地路由",
-    "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式"
+    "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式",
+    "proxyReasonAggregate": "使用跨供应商模型聚合"
   },
   "confirm": {
     "deleteProvider": "删除供应商",

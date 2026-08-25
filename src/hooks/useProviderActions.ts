@@ -35,7 +35,10 @@ import {
   providerNeedsRouting,
   supportsOfficialProxyTakeover,
 } from "@/utils/providerCapabilities";
-import { isOAuthProviderType } from "@/config/constants";
+import {
+  isAggregateProviderType,
+  isOAuthProviderType,
+} from "@/config/constants";
 
 /**
  * Hook for managing provider actions (add, update, delete, switch)
@@ -203,7 +206,11 @@ export function useProviderActions(
       // Determine why this provider requires the proxy.
       let proxyRequiredReason: string | null = null;
       if (!routingReady && providerNeedsRouting(activeApp, provider)) {
-        if (isCopilotProvider) {
+        if (isAggregateProviderType(provider.meta?.providerType)) {
+          proxyRequiredReason = t("notifications.proxyReasonAggregate", {
+            defaultValue: "使用跨供应商模型聚合",
+          });
+        } else if (isCopilotProvider) {
           proxyRequiredReason = t("notifications.proxyReasonCopilot", {
             defaultValue: "使用 GitHub Copilot 作为 Claude 供应商",
           });

@@ -1505,6 +1505,7 @@ function ProviderFormFull({
       if (incompleteTier) {
         toast.error(
           t("provider.aggregate.modelRequired", {
+            tier: incompleteTier,
             defaultValue: `请为 ${incompleteTier} 档填写上游模型名`,
           }),
         );
