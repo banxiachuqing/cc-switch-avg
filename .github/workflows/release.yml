@@ -180,10 +180,18 @@ jobs:
           echo "✅ Tauri signing key prepared"
 
       - name: Import Apple signing certificate
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        id: import-apple-cert
+        if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
+          # 无 Apple 开发者证书时跳过签名流程（构建产出未签名包，功能不受影响）
+          if [ -z "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+            echo "has_certificate=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ No Apple certificate secret — skipping code signing (unsigned build)"
+            exit 0
+          fi
+          echo "has_certificate=true" >> "$GITHUB_OUTPUT"
           # Decode .p12 certificate from base64
           CERT_PATH="$RUNNER_TEMP/certificate.p12"
           printf '%s' "${{ secrets.APPLE_CERTIFICATE }}" | (base64 --decode 2>/dev/null || base64 -D) > "$CERT_PATH"
@@ -222,7 +230,7 @@ jobs:
           rm -f "$CERT_PATH"
 
       - name: Build Tauri App (macOS, signed + notarized)
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS' && steps.import-apple-cert.outputs.has_certificate == 'true'
         shell: bash
         timeout-minutes: 60
         env:
@@ -251,7 +259,7 @@ jobs:
           done
 
       - name: Build Tauri App (macOS, unsigned — no Apple certificate)
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE == ''
+        if: runner.os == 'macOS' && steps.import-apple-cert.outputs.has_certificate != 'true'
         shell: bash
         timeout-minutes: 60
         run: |
@@ -377,7 +385,7 @@ jobs:
           echo "✅ Styled DMG created: $NEW_DMG"
 
       - name: Notarize macOS DMG
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS' && steps.import-apple-cert.outputs.has_certificate == 'true'
         shell: bash
         timeout-minutes: 30
         env:
@@ -419,7 +427,7 @@ jobs:
           done
 
       - name: Verify macOS code signing and notarization
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS' && steps.import-apple-cert.outputs.has_certificate == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -655,7 +663,7 @@ jobs:
             > `.tar.gz` 为 Tauri updater 自动更新专用，无需手动下载。
 
             ---
-            ${{ secrets.APPLE_CERTIFICATE != '' && 'macOS 版本已通过 Apple 代码签名和公证，可直接安装使用。' || 'macOS 版本为未签名构建（fork 无 Apple 开发者证书）：首次打开需右键「打开」或在系统设置中允许，功能不受影响。' }}
+            macOS 构建产物见上方列表；若为未签名构建（无 Apple 开发者证书），首次打开需右键「打开」或在系统设置中允许，功能不受影响。
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
