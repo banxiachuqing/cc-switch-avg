@@ -66,15 +66,14 @@ export function parseAggregateBindings(
       const b = (raw as Record<string, unknown>)[tier];
       if (!b || typeof b !== "object") continue;
       const providerId = (b as AggregateBinding).providerId;
+      // 仅供应商为空时丢弃该档;model 允许暂空(部分档在编辑中间态必须保留,
+      // 否则受控回写后 Select 已选值会被弹回空)
+      if (typeof providerId !== "string" || !providerId.trim()) continue;
       const model = (b as AggregateBinding).model;
-      if (
-        typeof providerId === "string" &&
-        providerId.trim() &&
-        typeof model === "string" &&
-        model.trim()
-      ) {
-        out[tier] = { providerId: providerId.trim(), model: model.trim() };
-      }
+      out[tier] = {
+        providerId: providerId.trim(),
+        model: typeof model === "string" ? model.trim() : "",
+      };
     }
     return out;
   } catch {
@@ -91,7 +90,9 @@ export function synthesizeAggregateEnv(
   for (const [tier, model] of Object.entries(AGGREGATE_CANONICAL_TIER_MODELS)) {
     env[TIER_ENV_KEYS[tier as keyof typeof TIER_ENV_KEYS]] = model;
   }
-  if (bindings.subagent) {
+  // 部分档(仅配了供应商)只是编辑中间态,不发出 subagent 标记,
+  // 避免代理把未配模型的 subagent 请求路由到半成品绑定
+  if (bindings.subagent?.model) {
     env.CLAUDE_CODE_SUBAGENT_MODEL = SUBAGENT_MARKER;
   }
   return env;
@@ -135,13 +136,10 @@ export function AggregateBindingsFields({
       providerId: patch.providerId ?? next[tier]?.providerId ?? "",
       model: patch.model ?? next[tier]?.model ?? "",
     };
-    if (!merged.providerId || !merged.model) {
-      // 未配齐的档不持久化(模型名可暂空编辑,清空供应商则整档移除)
-      if (!merged.providerId) delete next[tier];
-      else next[tier] = merged;
-    } else {
-      next[tier] = merged;
-    }
+    // 档位按当前字段原样持久化,模型名可暂空编辑(部分档);
+    // 仅清空供应商时移除整档
+    if (!merged.providerId) delete next[tier];
+    else next[tier] = merged;
     try {
       const cfg = settingsConfig ? JSON.parse(settingsConfig) : {};
       cfg.aggregate = next;
