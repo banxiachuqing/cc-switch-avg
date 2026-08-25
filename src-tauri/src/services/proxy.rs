@@ -1922,7 +1922,7 @@ impl ProxyService {
     }
 
     /// 构造写入 Live 的代理地址（处理 0.0.0.0 / IPv6 等特殊情况）
-    async fn build_proxy_urls(&self) -> Result<(String, String), String> {
+    pub(crate) async fn build_proxy_urls(&self) -> Result<(String, String), String> {
         let config = self
             .db
             .get_proxy_config()

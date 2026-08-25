@@ -3920,6 +3920,61 @@ wire_api = "responses"
             );
         });
     }
+
+    #[test]
+    #[serial]
+    fn switch_to_aggregate_writes_proxy_base_url_into_live() {
+        with_test_home(|state, _| {
+            crate::settings::reload_settings().expect("reload settings");
+
+            let source =
+                Provider::with_id("a".to_string(), "A".to_string(), json!({"env": {}}), None);
+            state
+                .db
+                .save_provider(AppType::Claude.as_str(), &source)
+                .expect("save source provider");
+
+            let mut agg = Provider::with_id(
+                "agg".to_string(),
+                "Aggregate".to_string(),
+                json!({
+                    "env": {"ANTHROPIC_AUTH_TOKEN": "placeholder"},
+                    "aggregate": {"default": {"providerId": "a", "model": "a-default"}}
+                }),
+                None,
+            );
+            agg.meta = Some(ProviderMeta {
+                provider_type: Some("aggregate".to_string()),
+                ..Default::default()
+            });
+            state
+                .db
+                .save_provider(AppType::Claude.as_str(), &agg)
+                .expect("save aggregate provider");
+
+            ProviderService::switch(state, AppType::Claude, "agg").expect("switch to aggregate");
+
+            let live: Value =
+                read_json_file(&get_claude_settings_path()).expect("read live settings");
+            let env = live
+                .get("env")
+                .and_then(Value::as_object)
+                .expect("live env should exist");
+            let base_url = env
+                .get("ANTHROPIC_BASE_URL")
+                .and_then(Value::as_str)
+                .expect("aggregate switch should inject ANTHROPIC_BASE_URL into live");
+            assert!(
+                base_url.starts_with("http://127.0.0.1:"),
+                "aggregate switch should point live base URL at the local proxy, got: {base_url}"
+            );
+            assert_eq!(
+                env.get("ANTHROPIC_AUTH_TOKEN").and_then(Value::as_str),
+                Some("placeholder"),
+                "injection must merge into env, not replace it"
+            );
+        });
+    }
 }
 
 impl ProviderService {
@@ -5101,6 +5156,34 @@ impl ProviderService {
         let provider = providers
             .get(id)
             .ok_or_else(|| AppError::Message(format!("供应商 {id} 不存在")))?;
+
+        // 聚合供应商本身不持有上游地址:写 live 前把 base URL 指向本地代理,
+        // 由代理按档位路由到绑定供应商。代理未运行时使用配置端口,
+        // 与「需启动代理才生效」的提示语义一致;端口为 0 且代理未运行时
+        // build_proxy_urls 报错,直接上抛,不静默跳过注入。
+        // 仅遮蔽目标 provider 变量:providers map 只用于回填「当前」供应商,
+        // 回填路径不能也不需注入(见下方 is_aggregate_provider 过滤)。
+        let provider_owned = if crate::proxy::aggregate::is_aggregate_provider(provider) {
+            let mut injected = provider.clone();
+            let (proxy_url, _) =
+                futures::executor::block_on(state.proxy_service.build_proxy_urls())
+                    .map_err(AppError::Message)?;
+            if let Some(env) = injected
+                .settings_config
+                .as_object_mut()
+                .map(|root| root.entry("env").or_insert_with(|| serde_json::json!({})))
+                .and_then(Value::as_object_mut)
+            {
+                env.insert(
+                    "ANTHROPIC_BASE_URL".to_string(),
+                    serde_json::Value::String(proxy_url),
+                );
+            }
+            injected
+        } else {
+            provider.clone()
+        };
+        let provider = &provider_owned;
 
         // OMO ↔ OMO Slim are mutually exclusive; activating one removes the other's config file.
         if matches!(app_type, AppType::OpenCode) {
