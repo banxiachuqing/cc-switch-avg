@@ -171,6 +171,35 @@ pub fn strip_one_m_suffix_for_upstream_from_body(mut body: Value) -> Value {
     body
 }
 
+/// Claude Code 模型档位（按关键字分类）。
+///
+/// 判定顺序与 `map_model` 的关键字链一致：fable 最先（fable 档未配置时
+/// 归入 opus 档的回退语义由调用方实现，这里只做分类）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelTier {
+    Fable,
+    Haiku,
+    Opus,
+    Sonnet,
+    Default,
+}
+
+/// 按关键字把请求模型名分类到档位；大小写不敏感。
+pub fn classify_model_tier(model: &str) -> ModelTier {
+    let model_lower = model.to_lowercase();
+    if model_lower.contains("fable") {
+        ModelTier::Fable
+    } else if model_lower.contains("haiku") {
+        ModelTier::Haiku
+    } else if model_lower.contains("opus") {
+        ModelTier::Opus
+    } else if model_lower.contains("sonnet") {
+        ModelTier::Sonnet
+    } else {
+        ModelTier::Default
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,5 +453,15 @@ mod tests {
         let body = json!({"model": "deepseek-v4-pro"});
         let result = strip_one_m_suffix_for_upstream_from_body(body);
         assert_eq!(result["model"], "deepseek-v4-pro");
+    }
+
+    #[test]
+    fn classify_tier_by_keyword() {
+        assert_eq!(classify_model_tier("claude-fable-5"), ModelTier::Fable);
+        assert_eq!(classify_model_tier("claude-fable-5[1m]"), ModelTier::Fable);
+        assert_eq!(classify_model_tier("claude-haiku-4-5"), ModelTier::Haiku);
+        assert_eq!(classify_model_tier("claude-opus-4-5"), ModelTier::Opus);
+        assert_eq!(classify_model_tier("Claude-SONNET-4-5"), ModelTier::Sonnet);
+        assert_eq!(classify_model_tier("deepseek-v4-pro"), ModelTier::Default);
     }
 }
