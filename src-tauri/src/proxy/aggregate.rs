@@ -73,6 +73,79 @@ pub fn is_aggregate_provider(provider: &Provider) -> bool {
         == Some(AGGREGATE_PROVIDER_TYPE)
 }
 
+/// 保存聚合供应商前的校验:default 档必填、来源供应商合法。
+/// self_id 为正在保存的供应商自身 id(新增时传将要使用的 id)。
+pub fn validate_bindings(
+    db: &Database,
+    app_type: &str,
+    self_id: &str,
+    provider: &Provider,
+) -> Result<(), AppError> {
+    let bindings = AggregateBindings::from_provider(provider).ok_or_else(|| {
+        AppError::localized(
+            "aggregate.config_invalid",
+            "聚合供应商缺少有效的档位绑定配置",
+            "Aggregate provider is missing valid tier bindings",
+        )
+    })?;
+
+    let check = |binding: &AggregateBinding, tier: &str| -> Result<(), AppError> {
+        if binding.model.trim().is_empty() {
+            return Err(AppError::localized(
+                "aggregate.model_empty",
+                format!("聚合供应商 {tier} 档的上游模型名不能为空"),
+                format!("Aggregate tier {tier} requires an upstream model name"),
+            ));
+        }
+        if binding.provider_id == self_id {
+            return Err(AppError::localized(
+                "aggregate.self_reference",
+                format!("聚合供应商 {tier} 档不能引用自身"),
+                format!("Aggregate tier {tier} cannot reference the aggregate provider itself"),
+            ));
+        }
+        match db.get_provider_by_id(&binding.provider_id, app_type)? {
+            None => Err(AppError::localized(
+                "aggregate.source_missing",
+                format!("聚合供应商 {tier} 档引用的来源供应商不存在"),
+                format!("Aggregate tier {tier} references a provider that does not exist"),
+            )),
+            Some(p) if is_aggregate_provider(&p) => Err(AppError::localized(
+                "aggregate.nested",
+                format!("聚合供应商 {tier} 档不能引用另一个聚合供应商"),
+                format!("Aggregate tier {tier} cannot reference another aggregate provider"),
+            )),
+            Some(p) if p.category.as_deref() == Some("official") => Err(AppError::localized(
+                "aggregate.official_source",
+                format!("聚合供应商 {tier} 档不能引用官方供应商(代理访问官方 API 有封号风险)"),
+                format!("Aggregate tier {tier} cannot reference an official provider"),
+            )),
+            Some(_) => Ok(()),
+        }
+    };
+
+    let default = bindings.default.as_ref().ok_or_else(|| {
+        AppError::localized(
+            "aggregate.default_required",
+            "聚合供应商必须配置 default 档作为兜底",
+            "Aggregate provider requires a default tier binding",
+        )
+    })?;
+    check(default, "default")?;
+    for (tier, binding) in [
+        ("opus", &bindings.opus),
+        ("sonnet", &bindings.sonnet),
+        ("haiku", &bindings.haiku),
+        ("fable", &bindings.fable),
+        ("subagent", &bindings.subagent),
+    ] {
+        if let Some(b) = binding {
+            check(b, tier)?;
+        }
+    }
+    Ok(())
+}
+
 /// 聚合路由结果:改投的来源供应商 + 已改写模型名的请求体
 pub struct AggregateRoute {
     pub provider: Provider,
@@ -103,10 +176,14 @@ pub fn resolve_route(
         return Ok(None);
     }
     let bindings = AggregateBindings::from_provider(current).ok_or_else(|| {
-        AppError::Config(format!(
-            "聚合供应商 {} 的 aggregate 配置无法解析",
-            current.id
-        ))
+        AppError::localized(
+            "aggregate.config_invalid",
+            format!("聚合供应商 {} 的 aggregate 配置无法解析", current.name),
+            format!(
+                "Aggregate provider {} has unparseable aggregate config",
+                current.name
+            ),
+        )
     })?;
 
     let model = body.get("model").and_then(Value::as_str).unwrap_or("");
@@ -496,5 +573,72 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    #[serial]
+    fn validate_requires_default_tier() {
+        let _home = TempHome::new();
+        let agg = aggregate_provider(json!({
+            "opus": {"providerId": "a", "model": "a-opus"}
+        }));
+        let db = setup_db(&agg, &[source_provider("a")]);
+        let err = validate_bindings(&db, "claude", "agg", &agg).unwrap_err();
+        assert!(err.to_string().contains("default"));
+    }
+
+    #[test]
+    #[serial]
+    fn validate_rejects_missing_or_aggregate_or_official_or_self_source() {
+        let _home = TempHome::new();
+        let mut official = source_provider("off");
+        official.category = Some("official".to_string());
+        let db = Arc::new(Database::memory().unwrap());
+        db.save_provider("claude", &source_provider("a")).unwrap();
+        db.save_provider("claude", &official).unwrap();
+
+        // 引用不存在的供应商
+        let bad = aggregate_provider(json!({
+            "default": {"providerId": "ghost", "model": "x"}
+        }));
+        assert!(validate_bindings(&db, "claude", "agg", &bad).is_err());
+
+        // 引用聚合供应商(嵌套)
+        let nested_agg = aggregate_provider_with_id(
+            "agg-nested-check",
+            json!({
+                "default": {"providerId": "a", "model": "a-default"}
+            }),
+        );
+        db.save_provider("claude", &nested_agg).unwrap();
+        let bad = aggregate_provider(json!({
+            "default": {"providerId": "agg-nested-check", "model": "x"}
+        }));
+        assert!(validate_bindings(&db, "claude", "agg", &bad).is_err());
+
+        // 引用官方供应商
+        let bad = aggregate_provider(json!({
+            "default": {"providerId": "off", "model": "x"}
+        }));
+        assert!(validate_bindings(&db, "claude", "agg", &bad).is_err());
+
+        // 自引用
+        let bad = aggregate_provider(json!({
+            "default": {"providerId": "agg", "model": "x"}
+        }));
+        assert!(validate_bindings(&db, "claude", "agg", &bad).is_err());
+
+        // 空模型名
+        let bad = aggregate_provider(json!({
+            "default": {"providerId": "a", "model": "  "}
+        }));
+        assert!(validate_bindings(&db, "claude", "agg", &bad).is_err());
+
+        // 合法配置通过
+        let good = aggregate_provider(json!({
+            "default": {"providerId": "a", "model": "a-default"},
+            "opus": {"providerId": "a", "model": "a-opus"}
+        }));
+        assert!(validate_bindings(&db, "claude", "agg", &good).is_ok());
     }
 }
